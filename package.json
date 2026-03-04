@@ -1,0 +1,31 @@
+{
+  "name": "realtime-voice-chat",
+  "version": "1.0.0",
+  "private": true,
+  "bin": "server.js",
+  "pkg": {
+    "assets": [
+      "index.html",
+      "styles.css",
+      "js/**/*",
+      "worklets/**/*",
+      ".env.example"
+    ],
+    "outputPath": "dist"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg . --targets node18-macos-arm64,node18-win-x64 --compress GZip",
+    "build:mac": "pkg . --targets node18-macos-arm64 --compress GZip",
+    "build:win": "pkg . --targets node18-win-x64 --compress GZip",
+    "build:embed": "node build.js all",
+    "build:embed:mac": "node build.js mac",
+    "build:embed:win": "node build.js win"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

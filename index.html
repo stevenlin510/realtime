@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Voice Chat</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1 class="header-title">Voice Chat</h1>
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <section class="setup-section" id="setupSection">
+                <div class="setup-card">
+                    <h2>Connect to Voice Chat</h2>
+                    <div class="input-group">
+                        <label for="voiceSelect">Voice</label>
+                        <select id="voiceSelect">
+                            <option value="cedar">Cedar</option>
+                            <option value="verse">Verse</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" id="connectBtn">Connect</button>
+                    <p class="setup-note">
+                        API key is securely stored on the server.
+                    </p>
+                </div>
+            </section>
+
+            <section class="chat-section" id="chatSection">
+                <div class="chat-header">
+                    <button class="btn btn-secondary" id="newChatBtn">New Chat</button>
+                </div>
+                <div class="transcript-container" id="transcriptContainer">
+                    <div class="transcript-messages" id="transcriptMessages">
+                        <!-- Messages will be added here -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer" id="footer">
+            <div class="ptt-controls">
+                <div class="recording-indicator" id="recordingIndicator">
+                    <span class="recording-dot"></span>
+                    <span class="recording-text">Recording</span>
+                </div>
+                <div class="ptt-instructions">
+                    <span class="ptt-key">Space</span>
+                    <span class="ptt-text">Hold to talk</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <div class="error-toast" id="errorToast">
+        <span class="error-message" id="errorMessage"></span>
+        <button class="error-close" id="errorClose">&times;</button>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+
+</html>

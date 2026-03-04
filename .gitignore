@@ -1,0 +1,15 @@
+# Environment variables (contains API keys)
+.env
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Debug files
+tmp.wav
+
+# OS files
+.DS_Store
+Thumbs.db
