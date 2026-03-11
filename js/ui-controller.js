@@ -1,5 +1,6 @@
 import { formatTimestamp, generateId } from './utils.js';
 import { CONFIG } from './config.js';
+import { WaveVisualizer } from './wave-visualizer.js';
 
 /**
  * Manages UI state and user interactions
@@ -10,6 +11,14 @@ export class UIController {
         this.elements = {
             setupSection: document.getElementById('setupSection'),
             chatSection: document.getElementById('chatSection'),
+            chatShell: document.getElementById('chatShell'),
+            conversationPanel: document.getElementById('conversationPanel'),
+            panelToggleBtn: document.getElementById('panelToggleBtn'),
+            panelPeekBtn: document.getElementById('panelPeekBtn'),
+            waveStyleBtn: document.getElementById('waveStyleBtn'),
+            waveFullscreenBtn: document.getElementById('waveFullscreenBtn'),
+            waveStage: document.getElementById('waveStage'),
+            aiWaveCanvas: document.getElementById('aiWaveCanvas'),
             footer: document.getElementById('footer'),
             voiceSelect: document.getElementById('voiceSelect'),
             connectBtn: document.getElementById('connectBtn'),
@@ -28,8 +37,13 @@ export class UIController {
         // State
         this.isRecording = false;
         this.isPttEnabled = false;
+        this.isAiSpeaking = false;
         this.currentUserMessageId = null;
         this.currentAiMessageId = null;
+
+        this.panelExpanded = true;
+        this.waveStyle = this.loadWaveStyle();
+        this.waveVisualizer = null;
 
         // Event callbacks
         this.onConnect = null;
@@ -41,8 +55,13 @@ export class UIController {
         this.handleKeyDown = this.handleKeyDown.bind(this);
         this.handleKeyUp = this.handleKeyUp.bind(this);
         this.handleWindowBlur = this.handleWindowBlur.bind(this);
+        this.handleFullscreenChange = this.handleFullscreenChange.bind(this);
 
         this.initializeEventListeners();
+        this.applyPanelState();
+        this.updateWaveStyleButton();
+        this.updateWaveFullscreenButton();
+        this.updateWaveStatus();
     }
 
     /**
@@ -67,12 +86,34 @@ export class UIController {
             this.onNewChat?.();
         });
 
+        // Panel controls
+        this.elements.panelToggleBtn?.addEventListener('click', () => {
+            this.togglePanelExpanded();
+        });
+
+        this.elements.panelPeekBtn?.addEventListener('click', () => {
+            if (!this.panelExpanded) {
+                this.panelExpanded = true;
+                this.applyPanelState();
+            }
+        });
+
+        this.elements.waveStyleBtn?.addEventListener('click', () => {
+            this.toggleWaveStyle();
+        });
+        this.elements.waveFullscreenBtn?.addEventListener('click', () => {
+            this.toggleWaveFullscreen();
+        });
+
         // Keyboard events for push-to-talk
         document.addEventListener('keydown', this.handleKeyDown);
         document.addEventListener('keyup', this.handleKeyUp);
+        document.addEventListener('fullscreenchange', this.handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', this.handleFullscreenChange);
 
         // Handle window blur (stop recording if user tabs away)
         window.addEventListener('blur', this.handleWindowBlur);
+
     }
 
     /**
@@ -139,6 +180,9 @@ export class UIController {
     updateRecordingState(isRecording) {
         this.elements.recordingIndicator.classList.toggle('active', isRecording);
         this.elements.pttKey.classList.toggle('pressed', isRecording);
+        if (!this.isAiSpeaking) {
+            this.updateWaveStatus();
+        }
     }
 
     /**
@@ -177,6 +221,11 @@ export class UIController {
                 connectBtn.disabled = false;
                 connectBtn.textContent = 'Connect';
         }
+
+        if (status === 'disconnected' || status === 'error') {
+            this.setAiSpeaking(false);
+            this.setAiWaveLevel(0);
+        }
     }
 
     /**
@@ -186,6 +235,19 @@ export class UIController {
         this.elements.setupSection.classList.add('hidden');
         this.elements.chatSection.classList.add('active');
         this.elements.footer.classList.add('active');
+
+        if (!this.waveVisualizer && this.elements.aiWaveCanvas) {
+            this.waveVisualizer = new WaveVisualizer(this.elements.aiWaveCanvas);
+            this.waveVisualizer.setStyle(this.waveStyle);
+            this.waveVisualizer.start();
+        }
+
+        this.updateWaveStyleButton();
+        this.updateWaveFullscreenButton();
+
+        this.panelExpanded = true;
+        this.applyPanelState();
+        this.updateWaveStatus();
     }
 
     /**
@@ -193,6 +255,9 @@ export class UIController {
      */
     enablePTT() {
         this.isPttEnabled = true;
+        if (!this.isAiSpeaking) {
+            this.updateWaveStatus();
+        }
     }
 
     /**
@@ -204,6 +269,150 @@ export class UIController {
             this.isRecording = false;
             this.updateRecordingState(false);
         }
+        this.setAiSpeaking(false);
+        this.setAiWaveLevel(0);
+        this.updateWaveStatus();
+    }
+
+    /**
+     * Toggle transcript panel expanded/collapsed state.
+     */
+    togglePanelExpanded() {
+        this.panelExpanded = !this.panelExpanded;
+        this.applyPanelState();
+    }
+
+    /**
+     * Apply panel state to the DOM.
+     */
+    applyPanelState() {
+        const panel = this.elements.conversationPanel;
+        panel.classList.remove('dock-right', 'expanded', 'collapsed');
+        panel.classList.add('dock-right');
+        panel.classList.add(this.panelExpanded ? 'expanded' : 'collapsed');
+
+        this.elements.chatShell.dataset.dock = 'right';
+        this.elements.chatShell.dataset.expanded = this.panelExpanded ? 'true' : 'false';
+
+        const panelToggleBtn = this.elements.panelToggleBtn;
+        panelToggleBtn.textContent = this.panelExpanded ? 'Collapse' : 'Expand';
+        panelToggleBtn.setAttribute('aria-expanded', this.panelExpanded ? 'true' : 'false');
+
+        const peekBtn = this.elements.panelPeekBtn;
+        peekBtn.setAttribute('aria-expanded', this.panelExpanded ? 'true' : 'false');
+        const isChatVisible = this.elements.chatSection.classList.contains('active');
+        peekBtn.classList.toggle('visible', isChatVisible && !this.panelExpanded);
+
+        // Collapse/expand changes the canvas width; force a resize pass.
+        requestAnimationFrame(() => {
+            this.waveVisualizer?.handleResize();
+        });
+    }
+
+    /**
+     * Update wave speaking state.
+     * @param {boolean} isSpeaking
+     */
+    setAiSpeaking(isSpeaking) {
+        this.isAiSpeaking = Boolean(isSpeaking);
+        this.elements.waveStage.classList.toggle('speaking', this.isAiSpeaking);
+        this.waveVisualizer?.setSpeaking(this.isAiSpeaking);
+        this.updateWaveStatus();
+    }
+
+    /**
+     * @param {number} level
+     */
+    setAiWaveLevel(level) {
+        this.waveVisualizer?.setLevel(level);
+    }
+
+    /**
+     * @returns {'ios' | 'ios9'}
+     */
+    loadWaveStyle() {
+        const stored = window.localStorage.getItem('waveStyle');
+        return stored === 'ios' ? 'ios' : 'ios9';
+    }
+
+    toggleWaveStyle() {
+        this.setWaveStyle(this.waveStyle === 'ios9' ? 'ios' : 'ios9');
+    }
+
+    /**
+     * @param {'ios' | 'ios9'} style
+     */
+    setWaveStyle(style) {
+        this.waveStyle = style === 'ios' ? 'ios' : 'ios9';
+        window.localStorage.setItem('waveStyle', this.waveStyle);
+        this.waveVisualizer?.setStyle(this.waveStyle);
+        this.updateWaveStyleButton();
+    }
+
+    updateWaveStyleButton() {
+        const btn = this.elements.waveStyleBtn;
+        if (!btn) return;
+
+        const isClassic = this.waveStyle === 'ios';
+        btn.textContent = isClassic ? 'Wave: Classic' : 'Wave: iOS9';
+        btn.setAttribute('aria-pressed', isClassic ? 'true' : 'false');
+        btn.classList.toggle('visible', this.elements.chatSection.classList.contains('active'));
+    }
+
+    /**
+     * Toggle fullscreen mode for the wave stage.
+     */
+    async toggleWaveFullscreen() {
+        const stage = this.elements.waveStage;
+        if (!stage) return;
+
+        try {
+            if (this.isWaveFullscreen()) {
+                if (document.exitFullscreen) {
+                    await document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            } else if (stage.requestFullscreen) {
+                await stage.requestFullscreen();
+            } else if (stage.webkitRequestFullscreen) {
+                stage.webkitRequestFullscreen();
+            }
+        } catch (error) {
+            console.error('Failed to toggle fullscreen mode:', error);
+        }
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    isWaveFullscreen() {
+        const stage = this.elements.waveStage;
+        return document.fullscreenElement === stage || document.webkitFullscreenElement === stage;
+    }
+
+    handleFullscreenChange() {
+        this.updateWaveFullscreenButton();
+        this.waveVisualizer?.handleResize();
+    }
+
+    updateWaveFullscreenButton() {
+        const btn = this.elements.waveFullscreenBtn;
+        if (!btn) return;
+
+        const isChatVisible = this.elements.chatSection.classList.contains('active');
+        const isFullscreen = this.isWaveFullscreen();
+
+        btn.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+        btn.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+        btn.classList.toggle('visible', isChatVisible);
+    }
+
+    /**
+     * Update wave status text from current app state.
+     */
+    updateWaveStatus() {
+        // Wave status text is intentionally removed from the UI.
     }
 
     /**
@@ -376,6 +585,9 @@ export class UIController {
     destroy() {
         document.removeEventListener('keydown', this.handleKeyDown);
         document.removeEventListener('keyup', this.handleKeyUp);
+        document.removeEventListener('fullscreenchange', this.handleFullscreenChange);
+        document.removeEventListener('webkitfullscreenchange', this.handleFullscreenChange);
         window.removeEventListener('blur', this.handleWindowBlur);
+        this.waveVisualizer?.destroy();
     }
 }

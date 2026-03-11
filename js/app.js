@@ -53,7 +53,19 @@ class App {
 
         // Audio playback events
         this.audioPlayback.onPlaybackDone = () => {
-            // Playback finished, could show visual indicator
+            this.ui.setAiSpeaking(false);
+            this.ui.setAiWaveLevel(0);
+        };
+
+        this.audioPlayback.onPlaybackLevel = (level) => {
+            this.ui.setAiWaveLevel(level);
+        };
+
+        this.audioPlayback.onPlaybackStateChange = (isPlaying) => {
+            this.ui.setAiSpeaking(isPlaying);
+            if (!isPlaying) {
+                this.ui.setAiWaveLevel(0);
+            }
         };
 
         // WebSocket events
@@ -80,7 +92,7 @@ class App {
         this.wsManager.onTranscriptDelta = (text, itemId) => {
             // Buffer transcript to sync with audio playback
             if (!this.ui.currentAiMessageId) {
-                this.ui.startAiMessage();  // Show placeholder
+                this.ui.startAiMessage(); // Show placeholder
             }
             this.bufferedTranscript += text;
         };
@@ -122,7 +134,6 @@ class App {
 
             // Connect to WebSocket proxy (API key is on server)
             await this.wsManager.connect(voice, systemPrompt);
-
         } catch (error) {
             console.error('Connection failed:', error);
 
@@ -156,6 +167,8 @@ class App {
 
         // Clear any playing audio when user starts speaking
         this.audioPlayback.clearBuffer();
+        this.ui.setAiSpeaking(false);
+        this.ui.setAiWaveLevel(0);
 
         // Cancel any in-progress AI response in UI
         this.ui.finishAiMessage();
@@ -169,14 +182,18 @@ class App {
     stopRecording() {
         this.audioCapture.stopCapture();
 
+        const submitStatus = this.wsManager.commitAudioAndRespond();
+        const turnAccepted = submitStatus.sent || submitStatus.queued;
+        if (!turnAccepted) {
+            return;
+        }
+
         // Show user message placeholder immediately (before AI responds)
         this.ui.startUserMessage();
 
         // Clear buffers for new response
         this.debugAudioBuffer = [];
         this.bufferedTranscript = '';
-
-        this.wsManager.commitAudioAndRespond();
     }
 
     /**
@@ -185,6 +202,8 @@ class App {
     async newChat() {
         // Stop and clear audio buffers
         this.audioPlayback.stop();
+        this.ui.setAiSpeaking(false);
+        this.ui.setAiWaveLevel(0);
 
         // Clear UI transcript
         this.ui.clearTranscript();
@@ -204,6 +223,8 @@ class App {
     playBufferedAudio() {
         if (this.debugAudioBuffer.length === 0) {
             console.log('No audio to play');
+            this.ui.setAiSpeaking(false);
+            this.ui.setAiWaveLevel(0);
             return;
         }
 

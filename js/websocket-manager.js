@@ -11,7 +11,11 @@ export class WebSocketManager {
         this.reconnectAttempts = 0;
         this.isConnecting = false;
         this.isConnected = false;
-        this.isResponseActive = false;
+        this.hasInFlightResponse = false;
+        this.queuedResponseCount = 0;
+        this.cancelRequested = false;
+        this.pendingInputAudioChunks = 0;
+        this.suppressAutoReconnect = false;
 
         // Event callbacks
         this.onConnectionChange = null;
@@ -42,12 +46,14 @@ export class WebSocketManager {
             this.onConnectionChange?.('connecting');
 
             // Connect to local proxy server (no API key needed - it's server-side)
+            this.suppressAutoReconnect = false;
             this.ws = new WebSocket(CONFIG.WEBSOCKET_URL);
 
             this.ws.onopen = () => {
                 this.isConnecting = false;
                 this.isConnected = true;
                 this.reconnectAttempts = 0;
+                this.resetResponseLifecycle();
                 this.onConnectionChange?.('connected');
                 this.configureSession();
                 resolve();
@@ -55,12 +61,15 @@ export class WebSocketManager {
 
             this.ws.onclose = () => {
                 const wasConnected = this.isConnected;
+                const shouldReconnect = wasConnected && !this.suppressAutoReconnect;
                 this.isConnecting = false;
                 this.isConnected = false;
+                this.suppressAutoReconnect = false;
+                this.resetResponseLifecycle();
                 this.onConnectionChange?.('disconnected');
 
                 // Attempt reconnection if it was a connected session
-                if (wasConnected) {
+                if (shouldReconnect) {
                     this.attemptReconnect();
                 }
             };
@@ -83,21 +92,34 @@ export class WebSocketManager {
      */
     configureSession() {
         const sessionConfig = {
-            modalities: ['text', 'audio'],
-            voice: this.voice,
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: {
-                model: 'gpt-4o-transcribe',
-                language: 'zh',
-                prompt: '繁體中文'
+            type: 'realtime',
+            output_modalities: ['audio'],
+            audio: {
+                input: {
+                    format: {
+                        type: 'audio/pcm',
+                        rate: 24000,
+                    },
+                    transcription: {
+                        model: 'gpt-4o-transcribe',
+                        language: 'zh',
+                        prompt: '繁體中文',
+                    },
+                    turn_detection: null, // Disable VAD for push-to-talk
+                },
+                output: {
+                    format: {
+                        type: 'audio/pcm',
+                        rate: CONFIG.AUDIO.SAMPLE_RATE,
+                    },
+                    voice: this.voice,
+                },
             },
-            turn_detection: null, // Disable VAD for push-to-talk
         };
 
-        // Add instructions (system prompt) if provided
-        if (this.instructions) {
-            sessionConfig.instructions = this.instructions;
+        const resolvedInstructions = (this.instructions || CONFIG.SYSTEM_PROMPT || '').trim();
+        if (resolvedInstructions) {
+            sessionConfig.instructions = resolvedInstructions;
         }
 
         this.send({
@@ -118,16 +140,18 @@ export class WebSocketManager {
                 break;
 
             case 'response.created':
-                this.isResponseActive = true;
+                this.hasInFlightResponse = true;
                 break;
 
             case 'response.audio.delta':
+            case 'response.output_audio.delta':
                 if (message.delta) {
                     this.onAudioDelta?.(message.delta);
                 }
                 break;
 
             case 'response.audio_transcript.delta':
+            case 'response.output_audio_transcript.delta':
                 if (message.delta) {
                     this.onTranscriptDelta?.(message.delta, message.item_id);
                 }
@@ -136,13 +160,14 @@ export class WebSocketManager {
             case 'conversation.item.input_audio_transcription.completed':
                 if (message.transcript) {
                     this.onUserTranscript?.(message.transcript, message.item_id);
-                    this.addConversationMessage('user', message.transcript);
                 }
                 break;
 
             case 'response.done':
-                this.isResponseActive = false;
+                this.hasInFlightResponse = false;
+                this.cancelRequested = false;
                 this.onResponseDone?.(message.response);
+                this.flushQueuedResponseIfReady();
                 break;
 
             case 'error':
@@ -160,6 +185,10 @@ export class WebSocketManager {
      * @param {Object} error
      */
     handleError(error) {
+        if (this.handleActiveResponseConflict(error)) {
+            return;
+        }
+
         let errorMessage = 'An error occurred';
 
         if (error) {
@@ -183,28 +212,30 @@ export class WebSocketManager {
     }
 
     /**
-     * Send a conversation item to the Realtime API
-     * @param {'user'|'assistant'} role
-     * @param {string} text
+     * Handle response-in-progress conflict from API.
+     * @param {Object} error
+     * @returns {boolean}
      */
-    addConversationMessage(role, text) {
-        if (role !== 'user') return;
-        const trimmed = text?.trim();
-        if (!trimmed) return;
+    handleActiveResponseConflict(error) {
+        const errorMessage = String(error?.message || '').toLowerCase();
+        const errorCode = String(error?.code || '').toLowerCase();
+        const isConflict = errorMessage.includes('active response in progress')
+            || errorMessage.includes('conversation already has an active response')
+            || errorCode === 'conversation_already_has_active_response';
 
-        this.send({
-            type: 'conversation.item.create',
-            item: {
-                type: 'message',
-                role: 'user',
-                content: [
-                    {
-                        type: 'input_text',
-                        text: trimmed,
-                    },
-                ],
-            },
-        });
+        if (!isConflict) {
+            return false;
+        }
+
+        this.hasInFlightResponse = true;
+        this.queuedResponseCount++;
+        if (this.isConnected && !this.cancelRequested) {
+            this.cancelRequested = true;
+            this.send({ type: 'response.cancel' });
+        }
+
+        // Suppress user-facing error for this recoverable race.
+        return true;
     }
 
     /**
@@ -212,30 +243,48 @@ export class WebSocketManager {
      * @param {string} base64Audio
      */
     sendAudio(base64Audio) {
-        if (!this.isConnected) return;
+        if (!this.isConnected || !base64Audio) return;
 
-        this.send({
+        const sent = this.send({
             type: 'input_audio_buffer.append',
             audio: base64Audio
         });
+        if (sent) {
+            this.pendingInputAudioChunks++;
+        }
     }
 
     /**
      * Commit the audio buffer and request a response
+     * @returns {{sent: boolean, queued: boolean, reason: string}}
      */
     commitAudioAndRespond() {
-        if (!this.isConnected) return;
+        if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            return { sent: false, queued: false, reason: 'not_connected' };
+        }
+
+        if (this.pendingInputAudioChunks === 0) {
+            return { sent: false, queued: false, reason: 'empty_audio' };
+        }
 
         // Commit the audio buffer
-        this.send({ type: 'input_audio_buffer.commit' });
+        const commitSent = this.send({ type: 'input_audio_buffer.commit' });
+        if (!commitSent) {
+            return { sent: false, queued: false, reason: 'commit_send_failed' };
+        }
+        this.pendingInputAudioChunks = 0;
 
-        // Request a response referencing the existing conversation
-        this.send({
-            type: 'response.create',
-            response: {
-                conversation: 'auto',
-            },
-        });
+        // Queue next response until current one finishes.
+        if (this.hasInFlightResponse) {
+            this.queuedResponseCount++;
+            return { sent: false, queued: true, reason: 'response_in_flight' };
+        }
+
+        if (this.createResponseNow()) {
+            return { sent: true, queued: false, reason: 'sent' };
+        }
+
+        return { sent: false, queued: false, reason: 'send_failed' };
     }
 
     /**
@@ -244,27 +293,75 @@ export class WebSocketManager {
     clearAudioBuffer() {
         if (!this.isConnected) return;
 
-        this.send({ type: 'input_audio_buffer.clear' });
+        const cleared = this.send({ type: 'input_audio_buffer.clear' });
+        if (cleared) {
+            this.pendingInputAudioChunks = 0;
+        }
     }
 
     /**
      * Cancel the current response (for interruptions)
      */
     cancelResponse() {
-        if (!this.isConnected || !this.isResponseActive) return;
+        if (!this.isConnected || !this.hasInFlightResponse || this.cancelRequested) return;
 
-        this.isResponseActive = false;
+        this.cancelRequested = true;
         this.send({ type: 'response.cancel' });
     }
 
     /**
      * Send a message through the WebSocket
      * @param {Object} message
+     * @returns {boolean}
      */
     send(message) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
+            return true;
         }
+        return false;
+    }
+
+    /**
+     * Send response.create immediately and mark response lifecycle state.
+     * @returns {boolean}
+     */
+    createResponseNow() {
+        const sent = this.send({
+            type: 'response.create',
+            response: {
+                conversation: 'auto',
+            },
+        });
+
+        if (sent) {
+            this.hasInFlightResponse = true;
+            this.cancelRequested = false;
+        }
+
+        return sent;
+    }
+
+    /**
+     * Send queued response if prior response has completed.
+     */
+    flushQueuedResponseIfReady() {
+        if (this.queuedResponseCount <= 0 || this.hasInFlightResponse) return;
+        if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+        if (this.createResponseNow()) {
+            this.queuedResponseCount = Math.max(0, this.queuedResponseCount - 1);
+        }
+    }
+
+    /**
+     * Reset response state.
+     */
+    resetResponseLifecycle() {
+        this.hasInFlightResponse = false;
+        this.queuedResponseCount = 0;
+        this.cancelRequested = false;
+        this.pendingInputAudioChunks = 0;
     }
 
     /**
@@ -300,13 +397,14 @@ export class WebSocketManager {
         this.reconnectAttempts = CONFIG.RECONNECTION.MAX_ATTEMPTS; // Prevent reconnection
 
         if (this.ws) {
+            this.suppressAutoReconnect = true;
             this.ws.close();
             this.ws = null;
         }
 
         this.isConnecting = false;
         this.isConnected = false;
-        this.isResponseActive = false;
+        this.resetResponseLifecycle();
     }
 
     /**
@@ -320,12 +418,13 @@ export class WebSocketManager {
         // Disconnect without triggering reconnect
         this.reconnectAttempts = CONFIG.RECONNECTION.MAX_ATTEMPTS;
         if (this.ws) {
+            this.suppressAutoReconnect = true;
             this.ws.close();
             this.ws = null;
         }
         this.isConnecting = false;
         this.isConnected = false;
-        this.isResponseActive = false;
+        this.resetResponseLifecycle();
 
         // Reset reconnect attempts and reconnect
         this.reconnectAttempts = 0;

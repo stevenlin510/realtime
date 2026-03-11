@@ -8,6 +8,7 @@
       "index.html",
       "styles.css",
       "js/**/*",
+      "node_modules/siriwave/dist/**/*",
       "worklets/**/*",
       ".env.example"
     ],
@@ -23,6 +24,7 @@
     "build:embed:win": "node build.js win"
   },
   "dependencies": {
+    "siriwave": "^2.4.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

@@ -62,7 +62,7 @@ const AUDIO_FILE = path.resolve(appDir, process.env.AUDIO_FILE || 'tmp.wav');
 const PUBLIC_DIR = path.resolve(__dirname);
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17';
+const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-1.5';
 
 // Validate API key on startup
 if (!OPENAI_API_KEY || OPENAI_API_KEY === 'sk-your-api-key-here') {
@@ -190,7 +190,6 @@ wss.on('connection', (clientWs, req) => {
     const openaiWs = new WebSocket(OPENAI_REALTIME_URL, {
         headers: {
             'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            'OpenAI-Beta': 'realtime=v1',
         },
     });
 

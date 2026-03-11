@@ -9,7 +9,11 @@ export class AudioPlayback {
         this.audioContext = null;
         this.workletNode = null;
         this.isInitialized = false;
+        this.isPlaying = false;
+
         this.onPlaybackDone = null;
+        this.onPlaybackLevel = null;
+        this.onPlaybackStateChange = null;
     }
 
     /**
@@ -30,8 +34,13 @@ export class AudioPlayback {
 
         // Handle messages from worklet
         this.workletNode.port.onmessage = (event) => {
-            if (event.data.type === 'playbackDone' && this.onPlaybackDone) {
-                this.onPlaybackDone();
+            if (event.data.type === 'playbackDone') {
+                this.updatePlaybackState(false);
+                this.onPlaybackDone?.();
+            }
+
+            if (event.data.type === 'level') {
+                this.onPlaybackLevel?.(event.data.value || 0);
             }
         };
 
@@ -61,6 +70,8 @@ export class AudioPlayback {
             type: 'audio',
             data: int16Array,
         });
+
+        this.updatePlaybackState(true);
     }
 
     /**
@@ -70,6 +81,8 @@ export class AudioPlayback {
         if (this.workletNode) {
             this.workletNode.port.postMessage({ type: 'clear' });
         }
+        this.onPlaybackLevel?.(0);
+        this.updatePlaybackState(false);
     }
 
     /**
@@ -80,12 +93,16 @@ export class AudioPlayback {
             this.workletNode.port.postMessage({ type: 'stop' });
             this.workletNode.port.postMessage({ type: 'clear' });
         }
+        this.onPlaybackLevel?.(0);
+        this.updatePlaybackState(false);
     }
 
     /**
      * Clean up resources
      */
     destroy() {
+        this.updatePlaybackState(false);
+
         if (this.workletNode) {
             this.workletNode.disconnect();
             this.workletNode = null;
@@ -97,5 +114,14 @@ export class AudioPlayback {
         }
 
         this.isInitialized = false;
+    }
+
+    /**
+     * @param {boolean} isPlaying
+     */
+    updatePlaybackState(isPlaying) {
+        if (this.isPlaying === isPlaying) return;
+        this.isPlaying = isPlaying;
+        this.onPlaybackStateChange?.(isPlaying);
     }
 }
