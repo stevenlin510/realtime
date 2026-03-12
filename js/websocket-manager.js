@@ -331,6 +331,7 @@ export class WebSocketManager {
             type: 'response.create',
             response: {
                 conversation: 'auto',
+                max_output_tokens: CONFIG.RESPONSE_MAX_OUTPUT_TOKENS,
             },
         });
 
