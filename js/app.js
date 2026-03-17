@@ -18,9 +18,6 @@ class App {
         // Debug: buffer to save AI audio response
         this.debugAudioBuffer = [];
 
-        // Buffer for AI transcript (to sync with audio playback)
-        this.bufferedTranscript = '';
-
         this.setupEventHandlers();
         this.setupCleanup();
     }
@@ -85,16 +82,19 @@ class App {
         };
 
         this.wsManager.onAudioDelta = (base64Audio) => {
-            // Buffered mode: accumulate audio, don't play yet
+            // Stream playback immediately while still keeping a debug copy.
             this.debugAudioBuffer.push(base64Audio);
+            this.audioPlayback.playAudio(base64Audio);
+            if (!this.ui.currentAiMessageId) {
+                this.ui.startAiMessage();
+            }
         };
 
         this.wsManager.onTranscriptDelta = (text, itemId) => {
-            // Buffer transcript to sync with audio playback
             if (!this.ui.currentAiMessageId) {
-                this.ui.startAiMessage(); // Show placeholder
+                this.ui.startAiMessage();
             }
-            this.bufferedTranscript += text;
+            this.ui.appendToAiMessage(text);
         };
 
         this.wsManager.onUserTranscript = (text, itemId) => {
@@ -102,14 +102,7 @@ class App {
         };
 
         this.wsManager.onResponseDone = () => {
-            // Display the complete transcript now (synced with audio)
-            if (this.bufferedTranscript) {
-                this.ui.setAiMessage(this.bufferedTranscript);
-            }
             this.ui.finishAiMessage();
-
-            // Buffered mode: play all accumulated audio now
-            this.playBufferedAudio();
 
             // Save audio to server
             this.saveDebugAudio();
@@ -193,7 +186,6 @@ class App {
 
         // Clear buffers for new response
         this.debugAudioBuffer = [];
-        this.bufferedTranscript = '';
     }
 
     /**
@@ -214,25 +206,6 @@ class App {
         } catch (error) {
             console.error('Failed to reset session:', error);
             this.ui.showError('Failed to start new chat. Please try again.');
-        }
-    }
-
-    /**
-     * Play all buffered audio at once
-     */
-    playBufferedAudio() {
-        if (this.debugAudioBuffer.length === 0) {
-            console.log('No audio to play');
-            this.ui.setAiSpeaking(false);
-            this.ui.setAiWaveLevel(0);
-            return;
-        }
-
-        console.log(`Playing ${this.debugAudioBuffer.length} audio chunks`);
-
-        // Play all chunks
-        for (const base64Audio of this.debugAudioBuffer) {
-            this.audioPlayback.playAudio(base64Audio);
         }
     }
 

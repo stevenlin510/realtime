@@ -382,29 +382,20 @@ body {
     border-radius: 1.65rem;
     border: 1px solid rgba(129, 167, 225, 0.42);
     overflow: hidden;
-    background:
-        radial-gradient(circle at 50% 2%, rgba(66, 138, 230, 0.3) 0%, rgba(0, 0, 0, 0) 52%),
-        linear-gradient(180deg, #040a15 0%, #020409 100%);
-    box-shadow:
-        inset 0 0 90px rgba(0, 0, 0, 0.62),
-        0 25px 60px rgba(0, 0, 0, 0.5);
+    background: #000;
+    box-shadow: none;
 }
 
 .wave-stage::before {
     content: '';
     position: absolute;
     inset: 0;
-    background:
-        linear-gradient(180deg, rgba(100, 145, 212, 0.1) 0%, rgba(100, 145, 212, 0) 42%),
-        radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 38%, rgba(0, 0, 0, 0) 72%);
+    background: none;
     pointer-events: none;
 }
 
 .wave-stage.speaking {
-    box-shadow:
-        inset 0 0 110px rgba(0, 0, 0, 0.56),
-        0 0 0 1px rgba(177, 203, 240, 0.44),
-        0 0 34px rgba(77, 130, 207, 0.26);
+    box-shadow: none;
 }
 
 .wave-style-toggle,
@@ -445,11 +436,13 @@ body {
 .wave-stage:fullscreen {
     border: none;
     border-radius: 0;
+    background: #000;
 }
 
 .wave-stage:-webkit-full-screen {
     border: none;
     border-radius: 0;
+    background: #000;
 }
 
 .ai-wave-canvas {
