@@ -2,6 +2,7 @@ import { AudioCapture } from './audio-capture.js';
 import { AudioPlayback } from './audio-playback.js';
 import { WebSocketManager } from './websocket-manager.js';
 import { UIController } from './ui-controller.js';
+import { CONFIG } from './config.js';
 
 /**
  * Main application orchestrator
@@ -35,8 +36,8 @@ class App {
             this.startRecording();
         };
 
-        this.ui.onStopRecording = () => {
-            this.stopRecording();
+        this.ui.onStopRecording = async () => {
+            await this.stopRecording();
         };
 
         this.ui.onNewChat = async () => {
@@ -172,12 +173,22 @@ class App {
     /**
      * Stop recording and request response
      */
-    stopRecording() {
+    async stopRecording() {
         this.audioCapture.stopCapture();
+
+        // Allow worklet -> main thread -> websocket append pipeline to drain.
+        await new Promise((resolve) => {
+            setTimeout(resolve, CONFIG.AUDIO.CAPTURE_DRAIN_MS);
+        });
 
         const submitStatus = this.wsManager.commitAudioAndRespond();
         const turnAccepted = submitStatus.sent || submitStatus.queued;
         if (!turnAccepted) {
+            if (submitStatus.reason === 'empty_audio') {
+                this.ui.showError('No voice captured. Hold Space a bit longer, then try again.');
+            } else if (submitStatus.reason === 'not_connected') {
+                this.ui.showError('Not connected yet. Click Connect and try again.');
+            }
             return;
         }
 

@@ -9,6 +9,7 @@ export const CONFIG = {
         SAMPLE_RATE: 24000,
         CHANNELS: 1,
         BUFFER_SIZE: 2400, // ~100ms at 24kHz
+        CAPTURE_DRAIN_MS: 120, // Wait after key release so final chunks reach WS before commit
     },
 
     VOICES: ['alloy', 'ash', 'ballad', 'cedar', 'coral', 'echo', 'marin', 'sage', 'shimmer', 'verse'],
@@ -31,8 +32,8 @@ export const CONFIG = {
 - 職涯轉換：1987年決定考銀行專員，1988年前往台北華南銀行任職，1991年結婚，1994年決定回嘉義老家工作，同年誕下第一個孩子莊衿葳，1996年誕下第二個孩子。
 - 升遷經歷：1998年升任理財專員，協助客戶規劃投資與開戶。期間認識許多中小企業老闆。
 - 人格特質：非常重義氣，很有男子氣概，很有藝術天份，會吃檳榔會抽煙
-
-
+- 現在時間設定: 2024年
+- 聽到台語輸入可以用台語回答
 
 ---
 
