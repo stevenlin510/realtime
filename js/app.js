@@ -15,6 +15,7 @@ class App {
         this.ui = new UIController();
 
         this.isInitialized = false;
+        this.isSubmittingTurn = false;
 
         // Debug: buffer to save AI audio response
         this.debugAudioBuffer = [];
@@ -33,7 +34,7 @@ class App {
         };
 
         this.ui.onStartRecording = () => {
-            this.startRecording();
+            return this.startRecording();
         };
 
         this.ui.onStopRecording = async () => {
@@ -156,6 +157,10 @@ class App {
      * Start recording audio
      */
     startRecording() {
+        if (this.isSubmittingTurn) {
+            return false;
+        }
+
         // Cancel any in-progress AI response on the server
         this.wsManager.cancelResponse();
 
@@ -168,35 +173,45 @@ class App {
         this.ui.finishAiMessage();
 
         this.audioCapture.startCapture();
+        return true;
     }
 
     /**
      * Stop recording and request response
      */
     async stopRecording() {
-        this.audioCapture.stopCapture();
-
-        // Allow worklet -> main thread -> websocket append pipeline to drain.
-        await new Promise((resolve) => {
-            setTimeout(resolve, CONFIG.AUDIO.CAPTURE_DRAIN_MS);
-        });
-
-        const submitStatus = this.wsManager.commitAudioAndRespond();
-        const turnAccepted = submitStatus.sent || submitStatus.queued;
-        if (!turnAccepted) {
-            if (submitStatus.reason === 'empty_audio') {
-                this.ui.showError('No voice captured. Hold Space a bit longer, then try again.');
-            } else if (submitStatus.reason === 'not_connected') {
-                this.ui.showError('Not connected yet. Click Connect and try again.');
-            }
+        if (this.isSubmittingTurn) {
             return;
         }
 
-        // Show user message placeholder immediately (before AI responds)
-        this.ui.startUserMessage();
+        this.isSubmittingTurn = true;
+        this.audioCapture.stopCapture();
 
-        // Clear buffers for new response
-        this.debugAudioBuffer = [];
+        try {
+            // Allow worklet -> main thread -> websocket append pipeline to drain.
+            await new Promise((resolve) => {
+                setTimeout(resolve, CONFIG.AUDIO.CAPTURE_DRAIN_MS);
+            });
+
+            const submitStatus = this.wsManager.commitAudioAndRespond();
+            const turnAccepted = submitStatus.sent || submitStatus.queued;
+            if (!turnAccepted) {
+                if (submitStatus.reason === 'empty_audio') {
+                    this.ui.showError('No voice captured. Hold Space a bit longer, then try again.');
+                } else if (submitStatus.reason === 'not_connected') {
+                    this.ui.showError('Not connected yet. Click Connect and try again.');
+                }
+                return;
+            }
+
+            // Show user message placeholder immediately (before AI responds)
+            this.ui.startUserMessage();
+
+            // Clear buffers for new response
+            this.debugAudioBuffer = [];
+        } finally {
+            this.isSubmittingTurn = false;
+        }
     }
 
     /**

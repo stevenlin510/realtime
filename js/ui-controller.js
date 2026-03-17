@@ -128,9 +128,12 @@ export class UIController {
             e.preventDefault(); // Prevent scrolling
 
             if (!this.isRecording) {
+                const canStart = this.onStartRecording ? this.onStartRecording() !== false : true;
+                if (!canStart) {
+                    return;
+                }
                 this.isRecording = true;
                 this.updateRecordingState(true);
-                this.onStartRecording?.();
             }
         }
     }
