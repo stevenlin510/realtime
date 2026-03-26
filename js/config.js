@@ -12,7 +12,7 @@ export const CONFIG = {
         CAPTURE_DRAIN_MS: 120, // Wait after key release so final chunks reach WS before commit
     },
 
-    VOICES: ['alloy', 'ash', 'ballad', 'cedar', 'coral', 'echo', 'marin', 'sage', 'shimmer', 'verse'],
+    VOICES: ['cedar', 'verse'],
     DEFAULT_VOICE: 'cedar',
 
     // System prompt - edit this before launching

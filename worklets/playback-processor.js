@@ -64,7 +64,8 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         }
 
         const sample = this.currentChunk[this.currentChunkIndex++];
-        this.queuedSamples = Math.max(0, this.queuedSamples - 1);
+        this.queuedSamples--;
+        if (this.queuedSamples < 0) this.queuedSamples = 0;
         this.lastSample = sample;
         return sample;
     }
@@ -76,9 +77,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
             let sumSquares = 0;
 
             for (let i = 0; i < channelData.length; i++) {
-                if (this.queuedSamples > 0) {
-                    const next = this.readQueuedSample();
-                    channelData[i] = next === null ? 0 : next;
+                const next = this.readQueuedSample();
+                if (next !== null) {
+                    channelData[i] = next;
                     this.releaseSamples = 0;
                 } else {
                     if (this.releaseSamples === 0 && Math.abs(this.lastSample) > 1e-6) {
@@ -99,7 +100,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
             }
 
             // Track empty frames to detect actual end of playback
-            if (this.isPlaying && this.queuedSamples === 0) {
+            if (this.isPlaying && this.queuedSamples <= 0 && this.chunkQueue.length === 0) {
                 this.emptyCount++;
                 // Only notify done after sustained silence (to handle streaming gaps)
                 if (this.emptyCount >= this.emptyThreshold) {

@@ -9,6 +9,7 @@ import { CONFIG } from './config.js';
  */
 class App {
     constructor() {
+        this.sharedAudioContext = null;
         this.audioCapture = new AudioCapture();
         this.audioPlayback = new AudioPlayback();
         this.wsManager = new WebSocketManager();
@@ -17,8 +18,9 @@ class App {
         this.isInitialized = false;
         this.isSubmittingTurn = false;
 
-        // Debug: buffer to save AI audio response
+        // Debug: buffer to save AI audio response (capped to prevent unbounded growth)
         this.debugAudioBuffer = [];
+        this.debugAudioMaxChunks = 5000; // ~20s at 24kHz typical chunk sizes
 
         this.setupEventHandlers();
         this.setupCleanup();
@@ -84,8 +86,10 @@ class App {
         };
 
         this.wsManager.onAudioDelta = (base64Audio) => {
-            // Stream playback immediately while still keeping a debug copy.
-            this.debugAudioBuffer.push(base64Audio);
+            // Stream playback immediately while still keeping a debug copy (capped).
+            if (this.debugAudioBuffer.length < this.debugAudioMaxChunks) {
+                this.debugAudioBuffer.push(base64Audio);
+            }
             this.audioPlayback.playAudio(base64Audio);
             if (!this.ui.currentAiMessageId) {
                 this.ui.startAiMessage();
@@ -148,8 +152,12 @@ class App {
      * Initialize audio capture and playback
      */
     async initializeAudio() {
-        await this.audioCapture.initialize();
-        await this.audioPlayback.initialize();
+        // Create a single shared AudioContext for both capture and playback
+        this.sharedAudioContext = new AudioContext({
+            sampleRate: CONFIG.AUDIO.SAMPLE_RATE,
+        });
+        await this.audioCapture.initialize(this.sharedAudioContext);
+        await this.audioPlayback.initialize(this.sharedAudioContext);
         this.isInitialized = true;
     }
 
@@ -347,6 +355,11 @@ class App {
         this.audioPlayback.destroy();
         this.wsManager.disconnect();
         this.ui.destroy();
+
+        if (this.sharedAudioContext) {
+            this.sharedAudioContext.close();
+            this.sharedAudioContext = null;
+        }
     }
 }
 

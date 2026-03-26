@@ -44,6 +44,7 @@ export class UIController {
         this.panelExpanded = true;
         this.waveStyle = this.loadWaveStyle();
         this.waveVisualizer = null;
+        this.errorToastTimer = null;
 
         // Event callbacks
         this.onConnect = null;
@@ -454,8 +455,9 @@ export class UIController {
     addUserMessage(text) {
         // If we have a pending user message, update it instead
         if (this.currentUserMessageId) {
+            const id = this.currentUserMessageId;
             this.updateUserMessage(text);
-            return this.currentUserMessageId;
+            return id;
         }
 
         const id = generateId();
@@ -571,8 +573,12 @@ export class UIController {
         this.elements.errorMessage.textContent = message;
         this.elements.errorToast.classList.add('visible');
 
+        // Clear any existing auto-hide timer before setting a new one
+        if (this.errorToastTimer) {
+            clearTimeout(this.errorToastTimer);
+        }
         // Auto-hide after 5 seconds
-        setTimeout(() => this.hideError(), 5000);
+        this.errorToastTimer = setTimeout(() => this.hideError(), 5000);
     }
 
     /**

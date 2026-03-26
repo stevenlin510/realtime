@@ -7,6 +7,7 @@ import { base64ToInt16Array } from './utils.js';
 export class AudioPlayback {
     constructor() {
         this.audioContext = null;
+        this.ownsContext = false;
         this.workletNode = null;
         this.isInitialized = false;
         this.isPlaying = false;
@@ -18,13 +19,20 @@ export class AudioPlayback {
 
     /**
      * Initialize audio playback
+     * @param {AudioContext} [sharedContext] - Optional shared AudioContext
      * @returns {Promise<void>}
      */
-    async initialize() {
-        // Create AudioContext with target sample rate
-        this.audioContext = new AudioContext({
-            sampleRate: CONFIG.AUDIO.SAMPLE_RATE,
-        });
+    async initialize(sharedContext) {
+        // Use shared AudioContext if provided, otherwise create our own
+        if (sharedContext) {
+            this.audioContext = sharedContext;
+            this.ownsContext = false;
+        } else {
+            this.audioContext = new AudioContext({
+                sampleRate: CONFIG.AUDIO.SAMPLE_RATE,
+            });
+            this.ownsContext = true;
+        }
 
         // Load the playback worklet
         await this.audioContext.audioWorklet.addModule('worklets/playback-processor.js');
@@ -54,14 +62,14 @@ export class AudioPlayback {
      * Queue audio for playback
      * @param {string} base64Audio - Base64 encoded PCM16 audio
      */
-    playAudio(base64Audio) {
+    async playAudio(base64Audio) {
         if (!this.isInitialized) {
             throw new Error('AudioPlayback not initialized');
         }
 
         // Resume AudioContext if suspended (required for Safari)
         if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume();
+            await this.audioContext.resume();
         }
 
         // Decode and send to worklet
@@ -108,10 +116,10 @@ export class AudioPlayback {
             this.workletNode = null;
         }
 
-        if (this.audioContext) {
+        if (this.audioContext && this.ownsContext) {
             this.audioContext.close();
-            this.audioContext = null;
         }
+        this.audioContext = null;
 
         this.isInitialized = false;
     }

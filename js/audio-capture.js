@@ -7,6 +7,7 @@ import { floatTo16BitPCM, int16ArrayToBase64 } from './utils.js';
 export class AudioCapture {
     constructor() {
         this.audioContext = null;
+        this.ownsContext = false;
         this.mediaStream = null;
         this.sourceNode = null;
         this.workletNode = null;
@@ -16,13 +17,20 @@ export class AudioCapture {
 
     /**
      * Initialize audio capture (request microphone permission)
+     * @param {AudioContext} [sharedContext] - Optional shared AudioContext
      * @returns {Promise<void>}
      */
-    async initialize() {
-        // Create AudioContext with target sample rate
-        this.audioContext = new AudioContext({
-            sampleRate: CONFIG.AUDIO.SAMPLE_RATE,
-        });
+    async initialize(sharedContext) {
+        // Use shared AudioContext if provided, otherwise create our own
+        if (sharedContext) {
+            this.audioContext = sharedContext;
+            this.ownsContext = false;
+        } else {
+            this.audioContext = new AudioContext({
+                sampleRate: CONFIG.AUDIO.SAMPLE_RATE,
+            });
+            this.ownsContext = true;
+        }
 
         // Request microphone access
         this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -59,14 +67,14 @@ export class AudioCapture {
     /**
      * Start capturing audio
      */
-    startCapture() {
+    async startCapture() {
         if (!this.audioContext || !this.workletNode) {
             throw new Error('AudioCapture not initialized');
         }
 
         // Resume AudioContext if suspended (required for Safari)
         if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume();
+            await this.audioContext.resume();
         }
 
         this.isCapturing = true;
@@ -100,9 +108,9 @@ export class AudioCapture {
             this.mediaStream = null;
         }
 
-        if (this.audioContext) {
+        if (this.audioContext && this.ownsContext) {
             this.audioContext.close();
-            this.audioContext = null;
         }
+        this.audioContext = null;
     }
 }

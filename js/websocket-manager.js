@@ -82,7 +82,11 @@ export class WebSocketManager {
             };
 
             this.ws.onmessage = (event) => {
-                this.handleMessage(JSON.parse(event.data));
+                try {
+                    this.handleMessage(JSON.parse(event.data));
+                } catch (e) {
+                    console.error('Failed to parse WebSocket message:', e);
+                }
             };
         });
     }
